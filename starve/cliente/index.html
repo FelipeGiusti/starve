@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$ starve</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235EE08A'/%3E%3Ctext x='16' y='22' font-family='monospace' font-weight='800' font-size='15' text-anchor='middle' fill='%230C0E13'%3E$_%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@700;800&family=JetBrains+Mono:wght@400;700;800&display=swap">
+<style>
+  :root {
+    --kernel: #0C0E13;
+    --userspace: #13161D;
+    --bus: #2A2F3B;
+    --stdout: #ECEEF3;
+    --stderr: #9AA1B2;
+    --running: #5EE08A;
+    --ready: #F2C14E;
+    --blocked: #FF7A6B;
+    --blocked-borda: #C9473A;
+    --new: #4FD3F0;
+    --display: 'Chivo Mono', monospace;
+    --sistema: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--kernel); color: var(--stdout); font-family: var(--sistema); -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--running); color: var(--kernel); }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  [hidden] { display: none !important; }
+
+  @keyframes piscar { 50% { opacity: 0; } }
+  @keyframes progresso { 0% { width: 0; } 80%, 100% { width: 100%; } }
+  @keyframes varredura { from { transform: translateY(-20vh); } to { transform: translateY(120vh); } }
+
+  .painel { position: fixed; padding: 12px 14px; background: rgba(12, 14, 19, .8); border: 1px solid var(--bus); border-radius: 12px; font-size: 11px; pointer-events: none; }
+  .secundario { color: var(--stderr); }
+
+  #hud { left: 16px; top: 16px; width: 210px; display: flex; flex-direction: column; gap: 8px; }
+  #hud-memoria { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -.02em; }
+  .faminto { color: var(--ready); animation: piscar 1s steps(1) infinite; }
+  .verde { color: var(--running); }
+
+  #top { right: 16px; top: 16px; width: 250px; max-width: calc(100% - 32px); }
+  .linha-top { display: grid; grid-template-columns: 22px 1fr 70px; gap: 8px; line-height: 1.8; }
+  .linha-top span:last-child { text-align: right; }
+  .cabecalho-top { color: var(--stderr); padding-bottom: 6px; border-bottom: 1px solid var(--bus); margin-bottom: 6px; }
+  .linha-top.eu { color: var(--running); }
+  .linha-top span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #dmesg { left: 16px; bottom: 16px; max-width: min(470px, calc(100% - 32px)); line-height: 1.7; color: var(--stderr); }
+  #dmesg div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .sobreposicao { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(12, 14, 19, .9); }
+  .grade { background-color: var(--kernel); background-image: linear-gradient(#151922 1px, transparent 1px), linear-gradient(90deg, #151922 1px, transparent 1px); background-size: 28px 28px; }
+  .cartao { position: relative; width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; padding: clamp(24px, 5vw, 40px); padding-top: 48px; border: 1px solid var(--bus); border-radius: 20px; background: var(--kernel); }
+  .rotulo { position: absolute; top: 16px; left: 20px; font-size: 11px; color: var(--stderr); letter-spacing: .12em; }
+
+  .logo { font-weight: 800; font-size: clamp(36px, 9vw, 56px); display: flex; align-items: center; }
+  .logo .prompt { color: var(--running); margin-right: .4em; }
+  .cursor { display: inline-block; width: .55em; height: .78em; margin-left: .06em; background: var(--running); animation: piscar 1s steps(1) infinite; }
+
+  .boot { font-size: 12px; line-height: 1.9; color: var(--stderr); }
+  .ok { color: var(--running); }
+  .espera { color: var(--ready); }
+  .erro { color: var(--blocked); }
+  .barra { height: 6px; background: var(--bus); border-radius: 3px; overflow: hidden; }
+  .barra div { height: 100%; background: var(--running); animation: progresso 3s cubic-bezier(.4, 0, .2, 1) infinite; }
+
+  label { font-size: 11px; letter-spacing: .12em; color: var(--stderr); }
+  input { width: 100%; padding: 14px 16px; font: 16px var(--sistema); color: var(--stdout); background: var(--userspace); border: 1px solid var(--bus); border-radius: 12px; outline: none; }
+  input:focus { border-color: var(--running); }
+  .botoes { display: flex; gap: 10px; flex-wrap: wrap; }
+  button { padding: 14px 22px; border-radius: 999px; font: 700 14px var(--sistema); cursor: pointer; border: 1px solid var(--bus); background: transparent; color: var(--stdout); }
+  button:hover { border-color: var(--stdout); }
+  button.principal { border: none; background: var(--running); color: var(--kernel); }
+  button.principal:hover { background: var(--stdout); }
+  #aviso { min-height: 1.4em; font-size: 13px; }
+
+  .morte { border-color: var(--blocked-borda); background: #160E10; }
+  .morte .rotulo { color: var(--blocked); }
+  #morte-titulo { font-family: var(--display); font-weight: 800; font-size: clamp(24px, 4vw, 36px); line-height: 1.1; letter-spacing: -.03em; }
+  #morte-texto { margin: 0; font-size: 13px; line-height: 1.6; color: #C4C9D4; }
+  .estatisticas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 11px; color: var(--stderr); }
+  .estatisticas div { display: flex; flex-direction: column; gap: 4px; }
+  .estatisticas span { color: var(--stdout); font-size: 16px; }
+
+  .scanlines { position: fixed; inset: 0; pointer-events: none; z-index: 60; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 3px); }
+  .scanlines::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 18vh; background: linear-gradient(transparent, rgba(94, 224, 138, .035), transparent); animation: varredura 7s linear infinite; }
+
+  @media (max-width: 640px) {
+    #hud { width: 150px; }
+    #hud-memoria { font-size: 18px; }
+    #top { width: 170px; }
+    .linha-top { grid-template-columns: 16px 1fr 56px; }
+    #dmesg { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::after { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<canvas id="tela"></canvas>
+
+<div id="hud" class="painel">
+  <div class="secundario">PID <span id="hud-pid">—</span> · <span id="hud-situacao" class="verde">RUNNING</span></div>
+  <div id="hud-memoria">0 KB</div>
+  <div id="hud-rank" class="secundario">rank #— · 0 processos</div>
+</div>
+
+<div id="top" class="painel">
+  <div class="linha-top cabecalho-top"><span>#</span><span>COMMAND</span><span>RES</span></div>
+  <div id="lista"></div>
+</div>
+
+<div id="dmesg" class="painel">
+  <div style="color: var(--stdout)">$ dmesg -w</div>
+  <div id="log"></div>
+</div>
+
+<div id="inicio" class="sobreposicao grade">
+  <form id="formulario" class="cartao">
+    <span class="rotulo">tty1 · <span id="tty-estado">connecting</span></span>
+    <div class="logo"><span class="prompt">$</span>starve<span class="cursor"></span></div>
+    <div class="boot">
+      <div>socket() → connect() <span id="boot-conexao" class="espera">...</span></div>
+      <div>mmap /arena <span id="boot-arena" class="espera">...</span></div>
+    </div>
+    <div class="barra"><div></div></div>
+    <label for="nome">NOME DO PROCESSO</label>
+    <input id="nome" maxlength="12" placeholder="voce" autocomplete="off" autofocus>
+    <div class="botoes"><button type="submit" class="principal">$ ./play</button></div>
+    <div id="aviso"></div>
+    <div class="secundario" style="font-size: 12px">dica: threads dividem a memória, não a culpa.</div>
+  </form>
+</div>
+
+<div id="morte" class="sobreposicao" hidden>
+  <div class="cartao morte">
+    <span class="rotulo">SIGNAL 9 · SIGKILL</span>
+    <div id="morte-titulo">Segmentation fault<br>(core dumped)</div>
+    <p id="morte-texto"></p>
+    <div class="estatisticas">
+      <div>uptime<span id="morte-uptime">00:00</span></div>
+      <div>peak RES<span id="morte-pico">0 KB</span></div>
+      <div>kills<span id="morte-kills">0</span></div>
+    </div>
+    <div class="botoes">
+      <button id="respawn" class="principal">respawn</button>
+      <button id="quit">quit</button>
+    </div>
+  </div>
+</div>
+
+<div class="scanlines"></div>
+
+<script>
+const tela = document.getElementById("tela");
+const ctx = tela.getContext("2d");
+const telaInicio = document.getElementById("inicio");
+const telaMorte = document.getElementById("morte");
+const aviso = document.getElementById("aviso");
+const campoNome = document.getElementById("nome");
+
+const LARGURA = 2000;
+const ALTURA = 2000;
+const CORES = {
+  running: ["#5EE08A", "#2FA35A"],
+  ready: ["#F2C14E", "#B88A1F"],
+  blocked: ["#FF7A6B", "#C9473A"],
+  novo: ["#4FD3F0", "#1F9AB8"],
+  zombie: ["#C79BFF", "#8E62D1"],
+};
+const CORES_RIVAIS = [CORES.blocked, CORES.novo, CORES.zombie, CORES.ready];
+const CORES_COMIDA = ["#5EE08A", "#F2C14E", "#4FD3F0", "#FF7A6B", "#C79BFF"];
+const FONTE_DISPLAY = "'Chivo Mono', monospace";
+const FONTE_SISTEMA = "'JetBrains Mono', monospace";
+const TEMPO_FAMINTO = 5000;
+
+let meuId = null;
+let meuNome = "";
+let vivo = false;
+let jogadores = [];
+let comidas = [];
+let camera = { x: LARGURA / 2, y: ALTURA / 2, escala: 1 };
+let mouse = { x: innerWidth / 2, y: innerHeight / 2 };
+let partida = { inicio: 0, pico: 0, kills: 0, massa: 0, ultimaRefeicao: 0, faminto: false, rank: 0 };
+let linhasLog = [];
+let exibidos = new Map();
+let ultimoQuadro = 0;
+
+function formatarMemoria(massa) {
+  const kb = massa * 4;
+  return kb >= 1024 ? (kb / 1024).toFixed(1) + " MB" : kb + " KB";
+}
+
+function registrar(texto) {
+  linhasLog = [...linhasLog, texto].slice(-4);
+  document.getElementById("log").replaceChildren(...linhasLog.map((linha) => {
+    const div = document.createElement("div");
+    div.textContent = linha;
+    return div;
+  }));
+}
+
+function nomeDe(id) {
+  const jogador = jogadores.find((j) => j.id === id);
+  return jogador ? jogador.nome : "?";
+}
+
+const protocoloWs = location.protocol === "https:" ? "wss://" : "ws://";
+const ws = new WebSocket(protocoloWs + location.host + "/ws");
+
+ws.onopen = () => {
+  document.getElementById("tty-estado").textContent = "connected";
+  const conexao = document.getElementById("boot-conexao");
+  conexao.textContent = location.host + " OK";
+  conexao.className = "ok";
+};
+
+ws.onmessage = (evento) => {
+  const tipo = evento.data[0];
+  const resto = evento.data.slice(1);
+
+  if (tipo === "I") {
+    meuId = Number(resto);
+    vivo = true;
+    const agora = performance.now();
+    partida = { inicio: agora, pico: 0, kills: 0, massa: 0, ultimaRefeicao: agora, faminto: false, rank: 0 };
+    telaInicio.hidden = true;
+    telaMorte.hidden = true;
+    registrar("Conectado. Você é o PID " + meuId + ". Tente não passar fome.");
+  } else if (tipo === "X") {
+    aviso.className = "erro";
+    aviso.textContent = "EAGAIN: arena cheia. Tente de novo em instantes.";
+  } else if (tipo === "S") {
+    const [parteJogadores, parteComidas] = resto.split("|");
+    jogadores = parteJogadores ? parteJogadores.split(";").map((texto) => {
+      const [id, x, y, massa, nome] = texto.split(",");
+      return { id: Number(id), x: Number(x), y: Number(y), massa: Number(massa), nome };
+    }) : [];
+    comidas = parteComidas ? parteComidas.split(";").map((texto) => texto.split(",").map(Number)) : [];
+    if (!document.getElementById("boot-arena").classList.contains("ok")) {
+      const arena = document.getElementById("boot-arena");
+      arena.textContent = jogadores.length + " processos OK";
+      arena.className = "ok";
+    }
+    atualizarPartida();
+  } else if (tipo === "E") {
+    const [comedor, comido] = resto.split(",").map(Number);
+    if (comido === meuId && vivo) {
+      morrer(comedor);
+    } else if (comedor === meuId) {
+      partida.kills += 1;
+      registrar("PID " + comido + " '" + nomeDe(comido) + "' terminado. Finalmente liberou memória.");
+    } else {
+      registrar("kill: PID " + comedor + " '" + nomeDe(comedor) + "' terminou PID " + comido + ".");
+    }
+  } else if (tipo === "R") {
+    document.getElementById("lista").replaceChildren(...(resto ? resto.split(";") : []).map((texto, posicao) => {
+      const [nome, massa] = texto.split(":");
+      const linha = document.createElement("div");
+      linha.className = "linha-top" + (nome === meuNome ? " eu" : "");
+      for (const valor of [posicao + 1, (nome === meuNome ? "▸ " : "") + nome, formatarMemoria(Number(massa))]) {
+        const celula = document.createElement("span");
+        celula.textContent = valor;
+        linha.append(celula);
+      }
+      return linha;
+    }));
+  }
+};
+
+ws.onclose = () => {
+  vivo = false;
+  telaMorte.hidden = true;
+  telaInicio.hidden = false;
+  document.getElementById("tty-estado").textContent = "disconnected";
+  const conexao = document.getElementById("boot-conexao");
+  conexao.textContent = "ECONNRESET";
+  conexao.className = "erro";
+  aviso.className = "erro";
+  aviso.textContent = "Timeout no socket. O servidor está repensando a vida. Recarregue a página.";
+};
+
+function atualizarPartida() {
+  const eu = jogadores.find((j) => j.id === meuId);
+  if (!eu || !vivo) return;
+
+  const agora = performance.now();
+  if (eu.massa > partida.massa) partida.ultimaRefeicao = agora;
+  partida.massa = eu.massa;
+  partida.pico = Math.max(partida.pico, eu.massa);
+
+  const faminto = agora - partida.ultimaRefeicao > TEMPO_FAMINTO;
+  if (faminto && !partida.faminto) registrar(TEMPO_FAMINTO / 1000 + " s sem CPU. O escalonador esqueceu de você.");
+  partida.faminto = faminto;
+
+  const rank = [...jogadores].sort((a, b) => b.massa - a.massa).findIndex((j) => j.id === meuId) + 1;
+  if (rank === 1 && partida.rank > 1) registrar("sudo: você agora é root.");
+  partida.rank = rank;
+
+  const situacao = document.getElementById("hud-situacao");
+  situacao.className = faminto ? "faminto" : "verde";
+  situacao.textContent = faminto ? "STARVING" : "RUNNING";
+  document.getElementById("hud-pid").textContent = meuId;
+  document.getElementById("hud-memoria").textContent = formatarMemoria(eu.massa);
+  document.getElementById("hud-rank").textContent = "rank #" + rank + " · " + jogadores.length + " processos";
+}
+
+function morrer(idAlgoz) {
+  vivo = false;
+  const segundos = Math.floor((performance.now() - partida.inicio) / 1000);
+  document.getElementById("morte-texto").textContent =
+    "PID " + meuId + " (" + meuNome + ") foi terminado por PID " + idAlgoz + " '" + nomeDe(idAlgoz) + "'. Não foi culpa sua, foi do ponteiro.";
+  document.getElementById("morte-uptime").textContent =
+    String(Math.floor(segundos / 60)).padStart(2, "0") + ":" + String(segundos % 60).padStart(2, "0");
+  document.getElementById("morte-pico").textContent = formatarMemoria(partida.pico);
+  document.getElementById("morte-kills").textContent = partida.kills;
+  registrar("Segmentation fault (core dumped).");
+  telaMorte.hidden = false;
+  document.getElementById("respawn").focus();
+}
+
+function entrar() {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  meuNome = campoNome.value.trim() || "voce";
+  ws.send("J" + meuNome);
+}
+
+document.getElementById("formulario").onsubmit = (evento) => {
+  evento.preventDefault();
+  entrar();
+};
+document.getElementById("respawn").onclick = entrar;
+document.getElementById("quit").onclick = () => {
+  telaMorte.hidden = true;
+  telaInicio.hidden = false;
+  aviso.textContent = "";
+  campoNome.focus();
+};
+
+addEventListener("mousemove", (evento) => {
+  mouse.x = evento.clientX;
+  mouse.y = evento.clientY;
+});
+
+addEventListener("touchmove", (evento) => {
+  mouse.x = evento.touches[0].clientX;
+  mouse.y = evento.touches[0].clientY;
+});
+
+setInterval(() => {
+  if (!vivo || ws.readyState !== WebSocket.OPEN) return;
+  const dx = (mouse.x - innerWidth / 2) / 150;
+  const dy = (mouse.y - innerHeight / 2) / 150;
+  ws.send("M" + dx.toFixed(2) + "," + dy.toFixed(2));
+}, 50);
+
+function raio(massa) {
+  return 6 * Math.sqrt(massa);
+}
+
+function corDe(jogador) {
+  return jogador.id === meuId ? CORES.running : CORES_RIVAIS[jogador.id % CORES_RIVAIS.length];
+}
+
+function contornoOndulado(x, y, r, semente, t) {
+  ctx.beginPath();
+  for (let i = 0; i <= 48; i++) {
+    const angulo = i / 48 * Math.PI * 2;
+    const rr = r * (1 + 0.022 * Math.sin(angulo * 5 + t * 2.2 + semente) + 0.014 * Math.sin(angulo * 3 - t * 1.6 + semente * 2));
+    const px = x + Math.cos(angulo) * rr;
+    const py = y + Math.sin(angulo) * rr;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+function desenharGrade(escala) {
+  ctx.lineWidth = 1 / escala;
+  ctx.strokeStyle = "#161A22";
+  ctx.beginPath();
+  for (let i = 0; i <= LARGURA; i += 50) {
+    ctx.moveTo(i, 0); ctx.lineTo(i, ALTURA);
+    ctx.moveTo(0, i); ctx.lineTo(LARGURA, i);
+  }
+  ctx.stroke();
+
+  ctx.strokeStyle = "#232835";
+  ctx.beginPath();
+  for (let i = 0; i <= LARGURA; i += 500) {
+    ctx.moveTo(i, 0); ctx.lineTo(i, ALTURA);
+    ctx.moveTo(0, i); ctx.lineTo(LARGURA, i);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "#3A4050";
+  ctx.font = 11 / escala + "px " + FONTE_SISTEMA;
+  for (let x = 0; x < LARGURA; x += 500) {
+    for (let y = 0; y < ALTURA; y += 500) {
+      const endereco = ((y / 500) * 4 + x / 500).toString(16).toUpperCase().padStart(2, "0");
+      ctx.fillText("shm 0x" + endereco + "000", x + 8 / escala, y + 16 / escala);
+    }
+  }
+
+  ctx.strokeStyle = "#2A2F3B";
+  ctx.lineWidth = 3 / escala;
+  ctx.strokeRect(0, 0, LARGURA, ALTURA);
+}
+
+function desenharCelula(jogador, escala, t) {
+  const r = raio(jogador.massa);
+  const [preenchimento, borda] = corDe(jogador);
+  const famintoEu = jogador.id === meuId && partida.faminto;
+
+  contornoOndulado(jogador.x, jogador.y, r, jogador.id, t);
+  ctx.fillStyle = preenchimento;
+  ctx.fill();
+  ctx.lineWidth = Math.max(3, r * 0.09);
+  if (famintoEu) ctx.setLineDash([r * 0.25, r * 0.18]);
+  ctx.strokeStyle = famintoEu ? CORES.ready[0] : borda;
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (r * escala <= 16) return;
+  const tamanho = Math.max(9, r * 0.3);
+  ctx.fillStyle = "#0C0E13";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "700 " + tamanho + "px " + FONTE_DISPLAY;
+  ctx.fillText(jogador.nome, jogador.x, jogador.y - tamanho * 0.18);
+  ctx.font = tamanho * 0.5 + "px " + FONTE_SISTEMA;
+  ctx.fillText("PID " + jogador.id, jogador.x, jogador.y + tamanho * 0.68);
+}
+
+function desenhar(instante) {
+  const dpr = devicePixelRatio || 1;
+  if (tela.width !== Math.round(innerWidth * dpr) || tela.height !== Math.round(innerHeight * dpr)) {
+    tela.width = Math.round(innerWidth * dpr);
+    tela.height = Math.round(innerHeight * dpr);
+  }
+
+  const dt = Math.min((instante - ultimoQuadro) / 1000, 0.1);
+  ultimoQuadro = instante;
+  const suavizacao = 1 - Math.exp(-dt * 15);
+  const visiveis = jogadores.map((j) => {
+    const anterior = exibidos.get(j.id) || j;
+    return {
+      ...j,
+      x: anterior.x + (j.x - anterior.x) * suavizacao,
+      y: anterior.y + (j.y - anterior.y) * suavizacao,
+      massa: anterior.massa + (j.massa - anterior.massa) * suavizacao,
+    };
+  });
+  exibidos = new Map(visiveis.map((j) => [j.id, j]));
+
+  const eu = visiveis.find((j) => j.id === meuId);
+  if (eu && vivo) {
+    camera.x = eu.x;
+    camera.y = eu.y;
+    camera.escala = Math.max(0.3, 1 / (1 + (eu.massa - 10) / 300));
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0C0E13";
+  ctx.fillRect(0, 0, tela.width, tela.height);
+
+  const escala = camera.escala;
+  ctx.setTransform(escala * dpr, 0, 0, escala * dpr,
+    (innerWidth / 2 - camera.x * escala) * dpr,
+    (innerHeight / 2 - camera.y * escala) * dpr);
+
+  desenharGrade(escala);
+
+  for (const [x, y] of comidas) {
+    ctx.fillStyle = CORES_COMIDA[(x * 7 + y * 13) % CORES_COMIDA.length];
+    ctx.fillRect(x - 4.5, y - 4.5, 9, 9);
+  }
+
+  const t = instante / 1000;
+  visiveis.sort((a, b) => a.massa - b.massa).forEach((j) => desenharCelula(j, escala, t));
+
+  requestAnimationFrame(desenhar);
+}
+
+requestAnimationFrame(desenhar);
+</script>
+</body>
+</html>
